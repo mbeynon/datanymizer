@@ -9,6 +9,32 @@ mod selector;
 use selector::Selector;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+#[serde(untagged)]
+enum ReplaceInvalid {
+    Rule(Box<Transformers>),
+    Json(String),
+}
+
+impl Default for ReplaceInvalid {
+    fn default() -> Self {
+        Self::Json("{}".to_string())
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
+enum OnInvalid {
+    AsIs,
+    ReplaceWith(ReplaceInvalid),
+    Error,
+}
+
+impl Default for OnInvalid {
+    fn default() -> Self {
+        Self::ReplaceWith(ReplaceInvalid::default())
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
 struct Field {
     name: String,
     selector: Selector,
@@ -20,6 +46,8 @@ struct Field {
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
 pub struct JsonTransformer {
     fields: Vec<Field>,
+    #[serde(default)]
+    on_invalid: OnInvalid,
 }
 
 impl Transformer for JsonTransformer {
@@ -84,9 +112,18 @@ impl Transformer for JsonTransformer {
                 }
                 TransformResult::present(value.to_string())
             }
-            Err(_) => {
-                // ignore invalid JSON from DB
-                TransformResult::present(field_value.to_string())
+            Err(e) => {
+                // invalid JSON from DB
+                match &self.on_invalid {
+                    OnInvalid::AsIs => TransformResult::present(field_value.to_string()),
+                    OnInvalid::Error => {
+                        TransformResult::error(field_name, field_value, e.to_string().as_str())
+                    }
+                    OnInvalid::ReplaceWith(replacement) => match replacement {
+                        ReplaceInvalid::Json(str) => TransformResult::present(str.clone()),
+                        ReplaceInvalid::Rule(t) => t.transform(field_name, field_value, ctx),
+                    },
+                }
             }
         }
     }
@@ -147,4 +184,6 @@ mod test {
             assert_eq!(new_user["comment"], json[i]["user"]["comment"]);
         }
     }
+
+    mod on_invalid {}
 }
