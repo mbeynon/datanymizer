@@ -7,6 +7,7 @@ use std::{collections::HashMap, hash::Hash, time::Instant};
 
 pub mod indicator;
 pub mod postgres;
+pub mod sqltext;
 
 // Dumper makes dump with same stages
 pub trait Dumper: 'static + Sized + Send {
@@ -22,7 +23,7 @@ pub trait Dumper: 'static + Sized + Send {
         self.post_data(connection)?;
 
         let finished = started.elapsed();
-        self.debug(format!("Full Dump finished in {}", HumanDuration(finished)));
+        self.debug(format!("Full Dump finished in {}\n", HumanDuration(finished)));
         Ok(())
     }
 

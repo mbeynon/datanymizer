@@ -7,6 +7,7 @@ use crate::options::{Options, TransactionConfig};
 use datanymizer_dumper::{
     indicator::{ConsoleIndicator, SilentIndicator},
     postgres::{connector::Connector, dumper::PgDumper, IsolationLevel},
+    sqltext::{connector::SqlTextConnector, dumper::SqlTextDumper},
     Dumper,
 };
 use datanymizer_engine::{Engine, Settings};
@@ -27,10 +28,22 @@ impl App {
     }
 
     pub fn run(&self) -> Result<()> {
-        let mut connection = self.connector().connect()?;
-        let engine = self.engine()?;
+        match &self.options.input_file {
+            Some(x) if x.eq("-") => self.run_sqltext_dumper(true, String::from("")),
+            Some(x)              => self.run_sqltext_dumper(false, x.clone()),
+            None                        => self.run_postgres_dumper()
+        }
+    }
 
-        match &self.options.file {
+    fn run_postgres_dumper(&self) -> Result<()> {
+        // db connection mode with a live db to introspect for schema and pull data
+        let engine = self.engine()?;
+        let mut connection = Connector::new(
+            self.database_url.clone(),
+            self.options.accept_invalid_hostnames,
+            self.options.accept_invalid_certs,
+        ).connect()?;
+        match &self.options.file {  // output file
             Some(filename) => PgDumper::new(
                 engine,
                 self.dump_isolation_level(),
@@ -53,13 +66,28 @@ impl App {
         }
     }
 
-    fn connector(&self) -> Connector {
-        let options = &self.options;
-        Connector::new(
-            self.database_url.clone(),
-            options.accept_invalid_hostnames,
-            options.accept_invalid_certs,
-        )
+    fn run_sqltext_dumper(&self, is_stdin: bool, infile: String) -> Result<()> {
+        // filter mode reading from stdin or a file with streamed .SQL dump data
+        let engine = self.engine()?;
+        let mut connection = SqlTextConnector::new(
+            is_stdin,
+            infile,
+        ).connect()?;
+        match &self.options.file {  // output file
+            Some(filename) => SqlTextDumper::new(
+                engine,
+                File::create(filename)?,                    
+                ConsoleIndicator::new(),
+            )?
+            .dump(&mut connection),
+
+            None => SqlTextDumper::new(
+                engine,
+                io::stdout(),
+                SilentIndicator,
+            )?
+            .dump(&mut connection),
+        }
     }
 
     fn engine(&self) -> Result<Engine> {

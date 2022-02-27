@@ -22,8 +22,11 @@ impl Default for TransactionConfig {
 #[derive(StructOpt, Debug, Clone, Default)]
 #[structopt(name = "pg_datanymizer")]
 pub struct Options {
-    #[structopt(name = "DBNAME")]
-    database: String,
+    #[structopt(
+        name = "DBNAME",
+        required_unless = "input-file"
+    )]
+    database: Option<String>,
 
     #[structopt(
         short,
@@ -37,9 +40,16 @@ pub struct Options {
         short,
         long,
         name = "FILE",
-        help = "Path to dump file, example: /tmp/dump.sql"
+        help = "Path to output dump file, example: /tmp/dump.sql"
     )]
     pub file: Option<String>,
+
+    #[structopt(
+        short,
+        long = "input",
+        help = "Path to plain-text SQL input (use '-' for STDIN).  This is the output of `pg_dump -Fp` or `pg_restore -f`"
+    )]
+    pub input_file: Option<String>,
 
     #[structopt(
         short,
@@ -103,13 +113,20 @@ pub struct Options {
 
 impl Options {
     pub fn database_url(&self) -> Result<Url> {
-        if let Ok(url) = Url::parse(self.database.as_str()) {
-            return match url.scheme() {
-                "postgres" | "postgresql" => Ok(url),
-                _ => Err(anyhow!("Scheme url error")),
-            };
+        return match &self.database {
+            Some(dbstr) => {
+                if let Ok(url) = Url::parse(dbstr.as_str()) {
+                    return match url.scheme() {
+                        "postgres" | "postgresql" => Ok(url),
+                        _ => Err(anyhow!("Scheme url error")),
+                    };
+                }
+                self.build_url(Some(dbstr.to_string()).filter(|x| !x.is_empty()))
+            }
+            None => {
+                self.build_url(None)
+            }
         }
-        self.build_url(Some(self.database.to_string()).filter(|x| !x.is_empty()))
     }
 
     fn build_url(&self, override_db_name: Option<String>) -> Result<Url> {
@@ -141,7 +158,7 @@ mod tests {
     #[test]
     fn parse_empty_config() {
         let cfg = Options {
-            database: "postgres://hostname/test".to_string(),
+            database: Some("postgres://hostname/test".to_string()),
             config: "./config.yml".to_string(),
             db_name: "test".to_string(),
             host: "localhost".to_string(),
@@ -216,11 +233,11 @@ mod tests {
         let scheme2 = "postgresql://user@hostname/test";
 
         let opts1 = Options {
-            database: scheme1.to_string(),
+            database: Some(scheme1.to_string()),
             ..Default::default()
         };
         let opts2 = Options {
-            database: scheme2.to_string(),
+            database: Some(scheme2.to_string()),
             ..Default::default()
         };
 

@@ -8,7 +8,7 @@ pub mod row;
 pub mod schema_inspector;
 pub mod table;
 
-mod escaper;
+pub mod escaper;
 mod query_wrapper;
 mod sequence;
 
