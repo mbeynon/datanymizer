@@ -3,10 +3,12 @@ use std::time::Duration;
 
 pub trait Indicator {
     fn start_pb(&self, _size: u64, _prefix: &str) {}
-
     fn inc_pb(&self, _i: u64) {}
-
     fn finish_pb(&self, _name: &str, _duration: Duration) {}
+
+    fn start_pb_stream(&self, _cur: u64, _tot: u64, _name: &str, _msg: &str) {}
+    fn inc_pb_stream(&self, _i: u64) {}
+    fn finish_pb_stream(&mut self, _i: u64, _duration: Duration) {}
 
     fn debug_msg(&self, _msg: &str) {}
 }
@@ -63,6 +65,33 @@ impl Indicator for ConsoleIndicator {
             )
             .as_str(),
         );
+    }
+
+    fn start_pb_stream(&self, cur: u64, tot: u64, name: &str, msg: &str) {
+        self.pb.set_style(
+            ProgressStyle::default_spinner()
+                .template("{prefix:.bold.dim}  {spinner}  {wide_msg}")
+                .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
+        );
+        let prefix = format!("[{}/{}] [Dumping: {}]", cur, tot, name);
+        self.pb.set_prefix(&prefix);
+        self.pb.set_position(0);
+        self.pb.set_message(msg);
+    }
+
+    fn inc_pb_stream(&self, i: u64) {
+        let msg = format!("{} rows", i);
+        self.pb.inc(i);
+        self.pb.set_message(&msg);
+    }
+
+    fn finish_pb_stream(&mut self, i: u64, duration: Duration) {
+        let msg = format!("{} rows processed in ({})", i, HumanDuration(duration));
+        self.pb.finish_with_message(&msg);
+        self.pb.reset();
+        self.pb.set_prefix("");
+        self.pb.set_message("");
+        self.debug_msg("");  // hack to preserve the last line display
     }
 
     fn debug_msg(&self, msg: &str) {

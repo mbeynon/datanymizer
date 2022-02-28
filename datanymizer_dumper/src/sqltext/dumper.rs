@@ -76,6 +76,7 @@ impl<W: 'static + Write + Send, I: 'static + Indicator + Send> SqlTextDumper<W, 
         let mut started = Instant::now();
         let mut tot_tables_transform = 0;
         let mut cur_table_transform = 0;
+        let mut num_rows = 0;
 
         for maybe_line in connection.reader().lines() {
             let line = maybe_line?;
@@ -114,16 +115,11 @@ impl<W: 'static + Write + Send, I: 'static + Indicator + Send> SqlTextDumper<W, 
                                     .all(|(a, b)| a.eq(b)) {
 
                                     cur_table_transform += 1;
-                                    self.debug(format!(
-                                        "[{} / {}] Prepare to anon table: {}",
-                                        cur_table_transform,
-                                        tot_tables_transform,
-                                        table.get_full_name(),
-                                    ));
+                                    num_rows = 0;
 
                                     started = Instant::now();
                                     self.indicator
-                                        .start_pb(0, &table.get_full_name());
+                                        .start_pb_stream(cur_table_transform,tot_tables_transform, &table.get_full_name(), "starting ...");
             
                                     // start transforming the table data
                                     self.state = ParseState::TableData;
@@ -163,7 +159,7 @@ impl<W: 'static + Write + Send, I: 'static + Indicator + Send> SqlTextDumper<W, 
                     if line.len() == 2 && line[..2].eq("\\.") {
                         let finished = started.elapsed();
                         self.indicator
-                            .finish_pb(table.get_full_name().as_str(), finished);
+                            .finish_pb_stream(num_rows, finished);
 
                         self.state = ParseState::Passthrough;
                     } else {
@@ -173,7 +169,8 @@ impl<W: 'static + Write + Send, I: 'static + Indicator + Send> SqlTextDumper<W, 
                             let transformed = row.transform(&self.engine, cfg.name.as_str())?;
 
                             self.dump_writer_all(&transformed)?;
-                            self.indicator.inc_pb(1);
+                            num_rows += 1;
+                            self.indicator.inc_pb_stream(num_rows);
                             continue
                         }
                     }
