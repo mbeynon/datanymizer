@@ -64,9 +64,9 @@ impl<W: 'static + Write + Send, I: 'static + Indicator + Send> SqlTextDumper<W, 
             \x22?(?P<schema>\w+)\x22?      # schema name, may be quoted
             \.
             \x22?(?P<table>\w+)\x22?       # table name, may be quoted
-            \s+\(\s*(?P<cols>.*)\s*\)\s+   # comma sep list of col names in parens
+            \s+\(\s*(?P<cols>.*)\s*\)\s+   # comma sep list of col names (may be quoted) in parens
             FROM\s+(?:STDIN)\s*;\s*$")?;
-        let re_copy_identifiers = Regex::new(r"(?P<col>[^,\s]+)")?;
+        let re_copy_identifiers = Regex::new(r"(\x22??P<col>\x22?[^,\s]+)")?;
 
         self.state = ParseState::Passthrough;
         let mut table: PgTable = PgTable::new(String::from(""), String::from(""));
@@ -127,8 +127,8 @@ impl<W: 'static + Write + Send, I: 'static + Indicator + Send> SqlTextDumper<W, 
                                 } else {
                                     eprintln!(
                                         "SqlTextDumper error: fields mismatch count/order:\n\tCREATE TABLE: {}\n\tCOPY INTO:    {}",
-                                        table.get_columns_names().join("*-*"),
-                                        copy_cols.join("*-*"),
+                                        table.get_columns_names().join(", "),
+                                        copy_cols.join(", "),
                                     );
                                     process::exit(1);  // or Result<Err> ?
                                 }
