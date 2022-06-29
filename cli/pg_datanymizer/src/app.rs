@@ -31,7 +31,7 @@ impl App {
         match &self.options.input_file {
             Some(x) if x.eq("-") => self.run_sqltext_dumper(true, String::from("")),
             Some(x)              => self.run_sqltext_dumper(false, x.clone()),
-            None                        => self.run_postgres_dumper()
+            None                 => self.run_postgres_dumper()
         }
     }
 
@@ -67,7 +67,7 @@ impl App {
     }
 
     fn run_sqltext_dumper(&self, is_stdin: bool, infile: String) -> Result<()> {
-        // filter mode reading from stdin or a file with streamed .SQL dump data
+        // streaming mode reading from stdin or a file with .SQL dump data
         let engine = self.engine()?;
         let mut connection = SqlTextConnector::new(
             is_stdin,
