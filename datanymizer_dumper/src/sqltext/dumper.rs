@@ -26,6 +26,7 @@ pub struct SqlTextDumper<W: Write + Send, I: Indicator + Send> {
     dump_writer: W,
     indicator: I,
     state: ParseState,
+    skip_table: bool,
     tables: Vec<PgTable>,
 }
 
@@ -41,6 +42,7 @@ impl<W: 'static + Write + Send, I: 'static + Indicator + Send> SqlTextDumper<W, 
             indicator,
             schema_inspector: SqlTextSchemaInspector {},
             state: ParseState::Passthrough,
+            skip_table: false,
             tables: Vec::new(),
         })
     }
@@ -69,6 +71,7 @@ impl<W: 'static + Write + Send, I: 'static + Indicator + Send> SqlTextDumper<W, 
         let re_copy_identifiers = Regex::new(r"(\x22??P<col>\x22?[^,\s]+)")?;
 
         self.state = ParseState::Passthrough;
+        self.skip_table = false;
         let mut table: PgTable = PgTable::new(String::from(""), String::from(""));
         let mut columns: Vec<PgColumn> = Vec::new();
         let mut col_position = 0i32;
@@ -87,6 +90,7 @@ impl<W: 'static + Write + Send, I: 'static + Indicator + Send> SqlTextDumper<W, 
                             let schema_name = caps.name("schema").map_or("", |m| m.as_str());
                             let table_name = caps.name("table").map_or("", |m| m.as_str());
                             table = PgTable::new(table_name.to_string(), schema_name.to_string());
+
                             if self.engine.settings.find_table(&table.get_names()).is_some() {
                                 self.state = ParseState::TableDefinition;
                                 columns.clear();
@@ -98,9 +102,22 @@ impl<W: 'static + Write + Send, I: 'static + Indicator + Send> SqlTextDumper<W, 
                         if let Some(caps) = re_copy_from.captures(line.as_str()) {
                             let schema_name = caps.name("schema").map_or("", |m| m.as_str());
                             let table_name = caps.name("table").map_or("", |m| m.as_str());
-    
-                            // check if matches a handled table, and anonymize it
                             let table_test = PgTable::new(table_name.to_string(), schema_name.to_string());
+    
+                            // check if a filtered table (except / exclude)
+                            self.skip_table = false;
+                            if let Some(filter) = &mut self.engine.settings.filter {
+                                filter.load_tables(vec![table_test.get_full_name()]);                                
+                                if !self.filter_table(table_test.get_full_name()) {
+                                    self.skip_table = true;
+                                    // start transforming the table data
+                                    self.state = ParseState::TableData;
+                                    self.write_log(format!("pg_datanymizer: EXCEPT/EXCLUDE TABLE COPY; Name: {}; Schema: {}", table_name, schema_name))?;
+                                    continue
+                                }
+                            }
+                            
+                            // check if matches a handled table, and anonymize it
                             if let Some(table_found) = self.tables.iter().find(|&t| t == &table_test) {
                                 table = (*table_found).clone();
                                 // cfg = self.engine.settings.find_table(&table.get_names()).unwrap();  // must exist
@@ -143,6 +160,7 @@ impl<W: 'static + Write + Send, I: 'static + Indicator + Send> SqlTextDumper<W, 
                         columns = Vec::new();
                         table = PgTable::new(String::from(""), String::from(""));
                         self.state = ParseState::Passthrough;
+                        self.skip_table = false;
                     } else if let Some(caps) = re_create_table_col.captures(line.as_str()) {
                         let id_name = caps.name("id").map_or("", |m| m.as_str());
                         let type_name = caps.name("type").map_or("", |m| m.as_str());
@@ -162,7 +180,9 @@ impl<W: 'static + Write + Send, I: 'static + Indicator + Send> SqlTextDumper<W, 
                             .finish_pb_stream(num_rows, finished);
 
                         self.state = ParseState::Passthrough;
-                    } else {
+                        self.skip_table = false;
+                        continue // prevent current line "\." from being emitted
+                    } else if !self.skip_table {
                         // TODO: do this find_table() once -- was getting type errors (Table trait vs PgTable type)
                         if let Some(cfg) = self.engine.settings.find_table(&table.get_names()) {
                             let row = PgRow::from_string_row(line, table.clone());
@@ -176,7 +196,9 @@ impl<W: 'static + Write + Send, I: 'static + Indicator + Send> SqlTextDumper<W, 
                     }
                 },
             };
-            self.dump_writer_all(&line)?;
+            if !self.skip_table {
+                self.dump_writer_all(&line)?;
+            }
         }
 
         Ok(())
@@ -239,6 +261,11 @@ impl<W: 'static + Write + Send, I: 'static + Indicator + Send> Dumper for SqlTex
         self.indicator.debug_msg(message.as_str());
     }
 }
+
+// fn setup_filter_tables(settings: &Settings) {
+//     // load the relevant Config settings into a filter
+//     let mut filter = Filter::
+// }
 
 #[cfg(test)]
 fn table_args(filter: &Option<Filter>) -> Result<Vec<String>> {
